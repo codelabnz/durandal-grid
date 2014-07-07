@@ -53,11 +53,14 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 	//DefaultValues
 	//
 	var defaults = {
-    caption: '',
+    		caption: '',
 		pageSize: 10,
 		pageSizeOptions: [25, 50, 75, 100],
 		alwaysShowPaging: false,
-		showPageSizeOptions: false
+		showPageSizeOptions: false,
+		totalRows: ko.observable(0),
+        	useServerSidePaging: false,
+        	refreshData: {}
 	};
 
 	var Grid = function(config) {
@@ -65,6 +68,10 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 
 		self.allRows = ko.isObservable(config.data) ? config.data : ko.observableArray(config.data || []);
 		
+		self.totalRows = ko.computed(function () {
+            		return config.useServerSidePaging ? config.totalRows() : self.allRows().length;
+        	});
+        
 		self.columns = ko.computed(function() {
 			var unwrappedColumns = ko.unwrap(config.columns),
 				unwrappedRows = ko.unwrap(self.allRows);
@@ -129,6 +136,10 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 			//Switch if column is same, otherwise set to true
 			self.sortDesc(column == self.sortColumn() ? !self.sortDesc() : true);
 			self.sortColumn(column);
+			
+			if (column.sortEvent) {
+                		column.sortEvent(column.header, column.property, self.sortDesc());
+            		}
 		};
 
 		var standardSort = function(a, b, sortProperty) {
@@ -142,10 +153,12 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 		self.sortedRows = ko.computed(function () {
 			var sorted = self.filteredRows().slice(), //We don't want to be sorting the original list
 				sortDirection = self.sortDesc() ? 1 : -1,
-				sortProperty = self.sortColumn().property || '';
+				sortProperty = self.sortColumn().property || '',
+				sortEvent = self.sortColumn().sortEvent;
 
-			if (sortProperty === '' )
-				return sorted;
+	            	if (typeof sortEvent != 'undefined' || sortProperty === '') {
+	                	return sorted;
+	            	}
 
 			var sort;
 			if (customSort)
@@ -186,19 +199,20 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 			? config.showPageSizeOptions 
 			: ko.observable(config.showPageSizeOptions !== undefined ? config.showPageSizeOptions : defaults.showPageSizeOptions);
 
-		self.pageCount = ko.computed(function() {
-			return Math.ceil(self.sortedRows().length / self.pageSize());
-		});
-
+  		self.pageCount = ko.computed(function () {
+            		return Math.ceil((config.useServerSidePaging ? self.totalRows() : self.sortedRows().length) / self.pageSize());
+        	});
+        	
 		self.showPaging = ko.computed(function() {
 			var alwaysShow = self.alwaysShowPaging(),
 				pageCount = self.pageCount();
 			return alwaysShow || pageCount > 1;
 		});
 
-		self.lastPageIndex = ko.computed(function () {
-			return Math.max(Math.ceil(self.sortedRows().length / self.pageSize()) - 1, 0);
-		});
+	 	self.lastPageIndex = ko.computed(function () {
+            		return Math.max(Math.ceil((config.useServerSidePaging ? self.totalRows() : self.sortedRows().length) / self.pageSize()) - 1, 0);
+        	});
+        
 		self.currentPageNumber = ko.computed(function () {
 			return self.pageIndex() + 1;
 		});
@@ -228,6 +242,10 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 		//And we want the most obvious name for that binding
 		self.rows = ko.computed({
 			read: function () {
+				if (config.useServerSidePaging)
+		                {
+		                    return self.sortedRows();
+		                }
 				var pageStartIndex = self.pageIndex() * self.pageSize(),
 					sortedRows = self.sortedRows();
 				if (self.pageIndex() == self.lastPageIndex())
@@ -260,6 +278,13 @@ define(['durandal/app', 'knockout', 'jquery'], function (app, ko, $) {
 					parent.className = '';
 			}
 		};
+		
+		if (config.useServerSidePaging)
+	        {
+	            self.pageIndex.subscribe(function (newValue) {
+	                config.refreshData(self.pageSize(), newValue);
+	            });
+	        }
 	};
 
 	return function GridWidget() {
